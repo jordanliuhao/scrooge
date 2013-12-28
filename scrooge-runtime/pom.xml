@@ -4,59 +4,28 @@
   <groupId>com.twitter</groupId>
   <artifactId>scrooge-runtime</artifactId>
   <packaging>jar</packaging>
-  <version>3.0.3-SNAPSHOT</version>
+  <version>3.11.3-SNAPSHOT</version>
   <parent>
     <groupId>com.twitter</groupId>
-    <artifactId>scrooge</artifactId>
-    <version>3.0.3-SNAPSHOT</version>
+    <artifactId>scala-parent-292</artifactId>
+    <version>0.1.6</version>
+    <relativePath>../../parents/scala-parent-292/pom.xml</relativePath>
   </parent>
   <properties>
     <git.dir>${project.basedir}/../../.git</git.dir>
   </properties>
   <dependencies>
-    <!-- scala library -->
-    <dependency>
-      <groupId>org.scala-lang</groupId>
-      <artifactId>scala-library</artifactId>
-      <version>2.9.2</version>
-    </dependency>
     <!-- library dependencies -->
+    <!-- project dependencies -->
     <dependency>
-      <groupId>org.apache.thrift</groupId>
-      <artifactId>libthrift</artifactId>
-      <version>0.8.0</version>
-      <scope>provided</scope>
+      <groupId>com.twitter</groupId>
+      <artifactId>scrooge-core</artifactId>
+      <version>3.11.3-SNAPSHOT</version>
     </dependency>
     <dependency>
       <groupId>com.twitter</groupId>
-      <artifactId>util-codec</artifactId>
-      <version>5.3.13</version>
+      <artifactId>finagle-thrift</artifactId>
+      <version>6.10.1-SNAPSHOT</version>
     </dependency>
   </dependencies>
-  <build>
-    <plugins>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-compiler-plugin</artifactId>
-        <version>2.5.1</version>
-        <configuration>
-          <source>1.6</source>
-          <target>1.6</target>
-        </configuration>
-      </plugin>
-      <plugin>
-        <groupId>net.alchim31.maven</groupId>
-        <artifactId>scala-maven-plugin</artifactId>
-        <version>3.1.0</version>
-        <executions>
-          <execution>
-            <goals>
-              <goal>compile</goal>
-              <goal>testCompile</goal>
-            </goals>
-          </execution>
-        </executions>
-      </plugin>
-    </plugins>
-  </build>
 </project>

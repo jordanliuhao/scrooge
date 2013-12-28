@@ -1,13 +1,13 @@
 private[this] object {{__stats_name}} {
-  val RequestsCounter = scopedStats.scope("{{clientFuncName}}").counter("requests")
-  val SuccessCounter = scopedStats.scope("{{clientFuncName}}").counter("success")
-  val FailuresCounter = scopedStats.scope("{{clientFuncName}}").counter("failures")
-  val FailuresScope = scopedStats.scope("{{clientFuncName}}").scope("failures")
+  val RequestsCounter = scopedStats.scope("{{clientFuncNameForWire}}").counter("requests")
+  val SuccessCounter = scopedStats.scope("{{clientFuncNameForWire}}").counter("success")
+  val FailuresCounter = scopedStats.scope("{{clientFuncNameForWire}}").counter("failures")
+  val FailuresScope = scopedStats.scope("{{clientFuncNameForWire}}").scope("failures")
 }
 
 {{#headerInfo}}{{>header}}{{/headerInfo}} = {
   {{__stats_name}}.RequestsCounter.incr()
-  this.service(encodeRequest("{{clientFuncName}}", {{ArgsStruct}}({{argNames}}))) flatMap { response =>
+  this.service(encodeRequest("{{clientFuncNameForWire}}", {{ArgsStruct}}({{argNames}}))) flatMap { response =>
     val result = decodeResponse(response, {{ResultStruct}})
     val exception =
 {{#hasThrows}}
@@ -16,12 +16,12 @@ private[this] object {{__stats_name}} {
 {{^hasThrows}}
       None
 {{/hasThrows}}
-{{#void}}
-    Future.Done
-{{/void}}
-{{^void}}
-    exception.orElse(result.success.map(Future.value)).getOrElse(Future.exception(missingResult("{{clientFuncName}}")))
-{{/void}}
+{{#isVoid}}
+    exception.getOrElse(Future.Done)
+{{/isVoid}}
+{{^isVoid}}
+    exception.orElse(result.success.map(Future.value)).getOrElse(Future.exception(missingResult("{{clientFuncNameForWire}}")))
+{{/isVoid}}
   } rescue {
     case ex: SourcedException => {
       if (this.serviceName != "") { ex.serviceName = this.serviceName }

@@ -18,8 +18,8 @@ package com.twitter.scrooge.backend
 
 import com.twitter.scrooge.ast._
 import com.twitter.scrooge.mustache.Dictionary
-import com.twitter.scrooge.ScroogeInternalException
 import com.twitter.scrooge.mustache.Dictionary._
+import com.twitter.scrooge.frontend.ScroogeInternalException
 
 trait StructTemplate {
   self: Generator =>
@@ -35,6 +35,11 @@ trait StructTemplate {
       "isEnum" -> v(false),
       "isBase" -> v(false))
 
+  def genWireConstType(t: FunctionType): CodeFragment = t match {
+    case _: EnumType => codify("I32")
+    case _ => genConstType(t)
+  }
+
   def readWriteInfo[T <: FieldType](sid: SimpleID, t: FieldType): Dictionary = {
     t match {
       case t: ListType =>
@@ -44,6 +49,7 @@ trait StructTemplate {
             "name" -> genID(sid),
             "eltName" -> genID(elt),
             "eltConstType" -> genConstType(t.eltType),
+            "eltWireConstType" -> genWireConstType(t.eltType),
             "eltType" -> genType(t.eltType),
             "eltReadWriteInfo" -> v(readWriteInfo(elt, t.eltType))
           )))
@@ -54,6 +60,7 @@ trait StructTemplate {
             "name" -> genID(sid),
             "eltName" -> genID(elt),
             "eltConstType" -> genConstType(t.eltType),
+            "eltWireConstType" -> genWireConstType(t.eltType),
             "eltType" -> genType(t.eltType),
             "eltReadWriteInfo" -> v(readWriteInfo(elt, t.eltType))
           )))
@@ -64,7 +71,9 @@ trait StructTemplate {
           "isMap" -> v(Dictionary(
             "name" -> genID(sid),
             "keyConstType" -> genConstType(t.keyType),
+            "keyWireConstType" -> genWireConstType(t.keyType),
             "valueConstType" -> genConstType(t.valueType),
+            "valueWireConstType" -> genWireConstType(t.valueType),
             "keyType" -> genType(t.keyType),
             "valueType" -> genType(t.valueType),
             "keyName" -> genID(key),
@@ -76,21 +85,13 @@ trait StructTemplate {
         TypeTemplate + Dictionary(
           "isStruct" -> v(Dictionary(
             "name" -> genID(sid),
-            "scopePrefix" -> (t.scopePrefix match {
-              case Some(sid) => genID(sid.append("_").prepend("_"))
-              case None => codify("")
-            }),
-            "fieldType" -> genID(t.sid.toTitleCase)
+            "fieldType" -> genType(t)
           )))
       case t: EnumType =>
         TypeTemplate + Dictionary(
           "isEnum" -> v(Dictionary(
             "name" -> genID(sid),
-            "scopePrefix" -> (t.scopePrefix match {
-              case Some(sid) => genID(sid.append("_").prepend("_"))
-              case None => codify("")
-            }),
-            "fieldType" -> genID(t.sid.toTitleCase)
+            "fieldType" -> genType(t)
           )))
       case t: BaseType =>
         TypeTemplate + Dictionary(
@@ -105,13 +106,6 @@ trait StructTemplate {
     }
   }
 
-  private def isQualified(fieldType: FieldType): Boolean = {
-    fieldType match {
-      case n: NamedType => n.scopePrefix.isDefined
-      case _ => false
-    }
-  }
-
   def fieldsToDict(fields: Seq[Field], blacklist: Seq[String]) = {
     fields.zipWithIndex map {
       case (field, index) =>
@@ -120,10 +114,15 @@ trait StructTemplate {
           "index" -> codify(index.toString),
           "indexP1" -> codify((index + 1).toString),
           "_fieldName" -> genID(field.sid.prepend("_")), // for Java only
-          "unsetName" -> genID(field.sid.toTitleCase.prepend("unset")), // for Java only
+          "unsetName" -> genID(field.sid.toTitleCase.prepend("unset")),
+          "readName" -> genID(field.sid.toTitleCase.prepend("read")),
+          "getBlobName" -> genID(field.sid.toTitleCase.prepend("get").append("Blob")),
+          "readBlobName" -> genID(field.sid.toTitleCase.prepend("read").append("Blob")),
           "getName" -> genID(field.sid.toTitleCase.prepend("get")), // for Java only
           "isSetName" -> genID(field.sid.toTitleCase.prepend("isSet")), // for Java only
           "fieldName" -> genID(field.sid),
+          "fieldNameForWire" -> codify(field.originalName),
+          "newFieldName" -> genID(field.sid.toTitleCase.prepend("new")),
           "FieldName" -> genID(field.sid.toTitleCase),
           "FIELD_NAME" -> genID(field.sid.toUpperCase),
           "gotName" -> genID(field.sid.prepend("_got_")),
@@ -131,10 +130,16 @@ trait StructTemplate {
           "fieldConst" -> genID(field.sid.toTitleCase.append("Field")),
           "constType" -> genConstType(field.fieldType),
           "isPrimitive" -> v(isPrimitive(field.fieldType)),
-          "isNamedType" -> v(field.fieldType.isInstanceOf[NamedType]),
-          "isQualified" -> v(isQualified(field.fieldType)),
           "primitiveFieldType" -> genPrimitiveType(field.fieldType, mutable = false),
           "fieldType" -> genType(field.fieldType, mutable = false),
+          "isImported" -> v(field.fieldType match {
+            case n: NamedType => n.scopePrefix.isDefined
+            case _ => false
+          }),
+          "isNamedType" -> v(field.fieldType.isInstanceOf[NamedType]),
+          "isEnum" -> v(field.fieldType.isInstanceOf[EnumType]),
+          // "qualifiedFieldType" is used to generate qualified type name even if it's not
+          // imported, in case other same-named entities are generated in the same file.
           "qualifiedFieldType" -> v(templates("qualifiedFieldType")),
           "hasDefaultValue" -> v(genDefaultFieldValue(field).isDefined),
           "defaultFieldValue" -> genDefaultFieldValue(field).getOrElse(NoValue),
@@ -145,26 +150,17 @@ trait StructTemplate {
           "optional" -> v(field.requiredness.isOptional),
           "nullable" -> v(isNullableType(field.fieldType, field.requiredness.isOptional)),
           "collection" -> v {
-            field.fieldType match {
-              case ListType(eltType, _) => List(
-                Dictionary(
-                  "elementType" -> genType(eltType)
-                )
-              )
-              case SetType(eltType, _) => List(
-                Dictionary(
-                  "elementType" -> genType(eltType)
-                )
-              )
+            (field.fieldType match {
+              case ListType(eltType, _) => List(genType(eltType))
+              case SetType(eltType, _) => List(genType(eltType))
               case MapType(keyType, valueType, _) => List(
-                Dictionary(
-                  "elementType" ->
-                    codify("(" + genType(keyType).toData + ", " + genType(valueType).toData + ")")
-                )
-              )
+                codify("(" + genType(keyType).toData + ", " + genType(valueType).toData + ")"))
               case _ => Nil
-            }
+            }) map { t => Dictionary("elementType" -> t) }
           },
+          "readFieldValueName" -> genID(field.sid.toTitleCase.prepend("read").append("Value")),
+          "writeFieldName" -> genID(field.sid.toTitleCase.prepend("write").append("Field")),
+          "writeFieldValueName" -> genID(field.sid.toTitleCase.prepend("write").append("Value")),
           "readField" -> v(templates("readField")),
           "readUnionField" -> v(templates("readUnionField")),
           "readValue" -> v(templates("readValue")),
@@ -220,10 +216,11 @@ trait StructTemplate {
     includes: Seq[Include],
     serviceOptions: Set[ServiceOption]
   ) = {
+    val isStruct = struct.isInstanceOf[Struct]
     val isException = struct.isInstanceOf[Exception_]
     val parentType = if (isException) {
-      if (serviceOptions contains WithFinagleClient) {
-        "ThriftException with SourcedException with ThriftStruct"
+      if (serviceOptions contains WithFinagle) {
+        "ThriftException with com.twitter.finagle.SourcedException with ThriftStruct"
       } else {
         "ThriftException with ThriftStruct"
       }
@@ -246,17 +243,24 @@ trait StructTemplate {
       struct.fields,
       if (isException) Seq("message") else Seq())
 
+    val isPublic = namespace.isDefined
+    val structName = if (isPublic) genID(struct.sid.toTitleCase) else genID(struct.sid)
+
     Dictionary(
-      "public" -> v(namespace.isDefined),
+      "public" -> v(isPublic),
       "package" -> namespace.map{ genID(_) }.getOrElse(codify("")),
-      "imports" -> v(importsDicts(includes)),
       "docstring" -> codify(struct.docstring.getOrElse("")),
       "parentType" -> codify(parentType),
       "fields" -> v(fieldDictionaries),
       "defaultFields" -> v(fieldsToDict(struct.fields.filter(!_.requiredness.isOptional), Seq())),
       "alternativeConstructor" -> v(
         struct.fields.exists(_.requiredness.isOptional) && struct.fields.exists(_.requiredness.isDefault)),
-      "StructName" -> genID(struct.sid.toTitleCase),
+      "StructNameForWire" -> codify(struct.originalName),
+      "StructName" ->
+        // if isPublic, the struct comes from a Thrift definition. Otherwise
+        // it's an internal struct: fooMethod$args or fooMethod$result
+        structName,
+      "InstanceClassName" -> (if (isStruct) codify("Immutable") else structName),
       "underlyingStructName" -> genID(struct.sid.prepend("_underlying_")),
       "arity" -> codify(arity.toString),
       "isException" -> v(isException),
@@ -266,8 +270,9 @@ trait StructTemplate {
       "arity0" -> v(arity == 0),
       "arity1" -> v((if (arity == 1) fieldDictionaries.take(1) else Nil)),
       "arityN" -> v(arity > 1 && arity <= 22),
-      "withProxy" -> v(struct.isInstanceOf[Struct]),
-      "withFinagleClient" -> v(serviceOptions contains WithFinagleClient)
+      "withFieldGettersAndSetters" -> v(isStruct || isException),
+      "withTrait" -> v(isStruct),
+      "date" -> codify(generationDate)
     )
   }
 }

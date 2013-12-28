@@ -2,6 +2,7 @@ package com.twitter.scrooge.ast
 
 sealed trait FunctionType extends TypeNode
 case object Void extends FunctionType
+case object OnewayVoid extends FunctionType
 sealed trait FieldType extends FunctionType
 sealed trait BaseType extends FieldType
 case object TBool extends BaseType

@@ -17,12 +17,31 @@
 package com.twitter.scrooge.backend
 
 import com.twitter.scrooge.ast._
-import com.twitter.scrooge.ScroogeInternalException
+import com.twitter.scrooge.frontend.{ScroogeInternalException, ResolvedDocument}
 import com.twitter.scrooge.mustache.Dictionary._
+import java.io.File
 
-class ScalaGenerator extends Generator {
+object ScalaGeneratorFactory extends GeneratorFactory {
+  val lang = "scala"
+  def apply(
+    includeMap: Map[String, ResolvedDocument],
+    defaultNamespace: String,
+    generationDate: String,
+    experimentFlags: Seq[String]
+  ): ThriftGenerator = new ScalaGenerator(includeMap, defaultNamespace, generationDate, experimentFlags)
+}
+
+class ScalaGenerator(
+  val includeMap: Map[String, ResolvedDocument],
+  val defaultNamespace: String,
+  val generationDate: String,
+  val experimentFlags: Seq[String]
+) extends Generator with ThriftGenerator {
+
   val fileExtension = ".scala"
   val templateDirName = "/scalagen/"
+
+  var warnOnJavaNamespaceFallback: Boolean = false
 
   private object ScalaKeywords {
     private[this] val set = Set[String](
@@ -41,18 +60,6 @@ class ScalaGenerator extends Generator {
     else
       str
 
-  def getNamespace(doc: Document): Identifier =
-    doc.namespace("scala") orElse doc.namespace("java") getOrElse (SimpleID("thrift"))
-
-  /**
-   * Get ID of service parent. If prefix is defined, it needs to be aliased, eg: "_prefix_"
-   */
-  def getServiceParentID(parent: ServiceParent): Identifier = {
-    parent.prefix match {
-      case Some(prefix) => parent.sid.addScope(prefix.append("_").prepend("_"))
-      case None => parent.sid
-    }
-  }
   def normalizeCase[N <: Node](node: N) = {
     (node match {
       case d: Document =>
@@ -88,6 +95,24 @@ class ScalaGenerator extends Generator {
     }).asInstanceOf[N]
   }
 
+  private[this] def getNamespaceWithWarning(doc: Document): Option[Identifier] =
+    doc.namespace("scala") orElse {
+      val ns = doc.namespace("java")
+      if (ns.isDefined && warnOnJavaNamespaceFallback)
+        println("falling back to the java namespace. this will soon be deprecated")
+      ns
+    }
+
+  override protected def getIncludeNamespace(includeFileName: String): Identifier = {
+    val javaNamespace = includeMap.get(includeFileName).flatMap {
+      doc: ResolvedDocument => getNamespaceWithWarning(doc.document)
+    }
+    javaNamespace.getOrElse(SimpleID(defaultNamespace))
+  }
+
+  override def getNamespace(doc: Document): Identifier =
+    getNamespaceWithWarning(doc) getOrElse (SimpleID(defaultNamespace))
+
   def genList(list: ListRHS, mutable: Boolean = false): CodeFragment = {
     val code = (if (mutable) "mutable.Buffer(" else "Seq(") +
       list.elems.map(genConstant(_).toData).mkString(", ") + ")"
@@ -107,6 +132,9 @@ class ScalaGenerator extends Generator {
     } mkString (", ")) + ")"
     codify(code)
   }
+
+  def genEnum(enum: EnumRHS): CodeFragment =
+    genID(enum.value.sid.toTitleCase.addScope(enum.enum.sid.toTitleCase))
 
   override def genDefaultValue(fieldType: FieldType, mutable: Boolean = false): CodeFragment = {
     val code = fieldType match {
@@ -178,6 +206,7 @@ class ScalaGenerator extends Generator {
   def genType(t: FunctionType, mutable: Boolean = false): CodeFragment = {
     val code = t match {
       case Void => "Unit"
+      case OnewayVoid => "Unit"
       case TBool => "Boolean"
       case TByte => "Byte"
       case TI16 => "Short"
@@ -192,12 +221,7 @@ class ScalaGenerator extends Generator {
         (if (mutable) "mutable." else "") + "Set[" + genType(x).toData + "]"
       case ListType(x, _) =>
         (if (mutable) "mutable.Buffer" else "Seq") + "[" + genType(x).toData + "]"
-      case n: NamedType =>
-        val id = n.scopePrefix match {
-          case Some(scope) => n.sid.addScope(scope.append("_").prepend("_"))
-          case None => n.sid
-        }
-        genID(id.toTitleCase).toData
+      case n: NamedType => genID(qualifyNamedType(n).toTitleCase).toData
       case r: ReferenceType =>
         throw new ScroogeInternalException("ReferenceType should not appear in backend")
     }
@@ -230,4 +254,28 @@ class ScalaGenerator extends Generator {
   }
 
   def genBaseFinagleService: CodeFragment = codify("FinagleService[Array[Byte], Array[Byte]]")
+
+  def getParentFinagleService(p: ServiceParent): CodeFragment =
+    genID(Identifier(getServiceParentID(p).fullName + "$FinagleService"))
+
+  def getParentFinagleClient(p: ServiceParent): CodeFragment =
+    genID(Identifier(getServiceParentID(p).fullName + "$FinagleClient"))
+
+  override def finagleClientFile(
+    packageDir: File,
+    service: Service, options:
+    Set[ServiceOption]
+  ): Option[File] =
+    options.find(_ == WithFinagle) map { _ =>
+      new File(packageDir, service.sid.toTitleCase.name + "$FinagleClient" + fileExtension)
+    }
+
+  override def finagleServiceFile(
+    packageDir: File,
+    service: Service, options:
+    Set[ServiceOption]
+  ): Option[File] =
+    options.find(_ == WithFinagle) map { _ =>
+      new File(packageDir, service.sid.toTitleCase.name + "$FinagleService" + fileExtension)
+    }
 }

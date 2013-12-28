@@ -1,8 +1,9 @@
 package {{package}};
 
-import com.twitter.scrooge.ScroogeOption;
+import com.twitter.scrooge.Option;
 import com.twitter.scrooge.ThriftStruct;
 import com.twitter.scrooge.ThriftStructCodec;
+import com.twitter.scrooge.ThriftStructCodec3;
 import com.twitter.scrooge.Utilities;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
@@ -14,66 +15,53 @@ import java.util.Set;
 import java.util.HashSet;
 import org.apache.thrift.protocol.*;
 import org.apache.thrift.TApplicationException;
-{{#imports}}
-import {{parentpackage}}.{{subpackage}}.*;
-{{/imports}}
 {{#withFinagle}}
-import com.twitter.util.Future;
-import com.twitter.util.FutureEventListener;
-{{/withFinagle}}
-{{#withFinagleClient}}
+import com.twitter.finagle.Service;
 import com.twitter.finagle.SourcedException;
+import com.twitter.finagle.stats.Counter;
 import com.twitter.finagle.stats.NullStatsReceiver;
 import com.twitter.finagle.stats.StatsReceiver;
 import com.twitter.finagle.thrift.ThriftClientRequest;
+import com.twitter.util.Function2;
+import com.twitter.util.Function;
+import com.twitter.util.Future;
+import com.twitter.util.FutureEventListener;
 import java.util.Arrays;
 import org.apache.thrift.TException;
-{{/withFinagleClient}}
-{{#withFinagleService}}
-import com.twitter.finagle.Service;
-import com.twitter.finagle.stats.Counter;
-import com.twitter.util.Function;
-import com.twitter.util.Function2;
 import org.apache.thrift.transport.TMemoryBuffer;
 import org.apache.thrift.transport.TMemoryInputTransport;
 import org.apache.thrift.transport.TTransport;
-{{/withFinagleService}}
-{{#withOstrichServer}}
-import com.twitter.finagle.builder.Server;
-import com.twitter.finagle.builder.ServerBuilder;
-import com.twitter.finagle.stats.StatsReceiver;
-import com.twitter.finagle.thrift.ThriftServerFramedCodec;
-import com.twitter.finagle.tracing.NullTracer;
-import com.twitter.finagle.tracing.Tracer;
-import com.twitter.logging.Logger;
-{{/withOstrichServer}}
+{{/withFinagle}}
 
 {{docstring}}
+@javax.annotation.Generated(value = "com.twitter.scrooge.Compiler", date = "{{date}}")
 public class {{ServiceName}} {
-  public interface Iface {{syncExtends}}{
+  public interface Iface {{#syncParent}}extends {{syncParent}} {{/syncParent}}{
 {{#syncFunctions}}
     {{>function}};
 {{/syncFunctions}}
   }
 
 {{#withFinagle}}
-  public interface FutureIface {{asyncExtends}}{
+  public interface FutureIface {{#futureIfaceParent}}extends {{futureIfaceParent}} {{/futureIfaceParent}}{
 {{#asyncFunctions}}
     {{>function}};
 {{/asyncFunctions}}
   }
 {{/withFinagle}}
 
-{{#structs}}
+{{#internalStructs}}
+{{#internalArgsStruct}}
   {{>struct}}
-{{/structs}}
+{{/internalArgsStruct}}
+{{#internalResultStruct}}
+  {{>struct}}
+{{/internalResultStruct}}
+{{/internalStructs}}
 {{#finagleClients}}
   {{>finagleClient}}
 {{/finagleClients}}
 {{#finagleServices}}
   {{>finagleService}}
 {{/finagleServices}}
-{{#ostrichServers}}
-  {{>ostrichServer}}
-{{/ostrichServers}}
 }

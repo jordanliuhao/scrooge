@@ -1,0 +1,9 @@
+scala_library(name='scala',
+  dependencies=[
+    pants('finagle/finagle-core'),
+    pants('finagle/finagle-thrift'),
+    pants('util/util-core'),
+    pants('scrooge/scrooge-core')
+  ],
+  sources=rglobs('*.scala'),
+)

@@ -17,12 +17,28 @@ package com.twitter.scrooge.backend
  */
 
 import com.twitter.scrooge.ast._
-import com.twitter.scrooge.ScroogeInternalException
 import com.twitter.scrooge.mustache.Dictionary._
+import com.twitter.scrooge.frontend.{ScroogeInternalException, ResolvedDocument}
 
-class JavaGenerator extends Generator {
+object JavaGeneratorFactory extends GeneratorFactory {
+  val lang = "experimental-java"
+  def apply(
+    includeMap: Map[String, ResolvedDocument],
+    defaultNamespace: String,
+    generationDate: String,
+    experimentFlags: Seq[String]
+  ): ThriftGenerator = new JavaGenerator(includeMap, defaultNamespace, generationDate)
+}
+
+class JavaGenerator(
+  val includeMap: Map[String, ResolvedDocument],
+  val defaultNamespace: String,
+  val generationDate: String
+) extends Generator with ThriftGenerator {
+
   val fileExtension = ".java"
   val templateDirName = "/javagen/"
+  val experimentFlags = Seq.empty[String]
 
   private[this] object JavaKeywords {
     private[this] val set = Set[String](
@@ -43,18 +59,6 @@ class JavaGenerator extends Generator {
       "_" + str + "_"
     else
       str
-
-  def getNamespace(doc: Document): Identifier =
-    doc.namespace("java") getOrElse (SimpleID("thrift"))
-
-  /**
-   * get the ID of service parent.
-   */
-  // todo (csl-301): currently we just use the service's SimpleID, because
-  // in the Java code it imports everything in the namespace that the service is defined in
-  // This will be a problem if there are multiple such imported services that share the same
-  // name, in which case we need to fully qualify the service name.
-  def getServiceParentID(parent: ServiceParent): Identifier = parent.sid
 
   def normalizeCase[N <: Node](node: N) = {
     (node match {
@@ -111,6 +115,9 @@ class JavaGenerator extends Generator {
     } mkString (", ")) + ")"
     codify(code)
   }
+
+  def genEnum(enum: EnumRHS): CodeFragment =
+    genID(enum.value.sid.toUpperCase.addScope(enum.enum.sid.toTitleCase))
 
   /**
    * Generates a suffix to append to a field expression that will
@@ -183,6 +190,7 @@ class JavaGenerator extends Generator {
   def genType(t: FunctionType, mutable: Boolean = false): CodeFragment = {
     val code = t match {
       case Void => "Void"
+      case OnewayVoid => "Void"
       case TBool => "Boolean"
       case TByte => "Byte"
       case TI16 => "Short"
@@ -194,7 +202,7 @@ class JavaGenerator extends Generator {
       case MapType(k, v, _) => "Map<" + genType(k).toData + ", " + genType(v).toData + ">"
       case SetType(x, _) => "Set<" + genType(x).toData + ">"
       case ListType(x, _) => "List<" + genType(x).toData + ">"
-      case n: NamedType => n.sid.toTitleCase.name // todo CSL-272: shouldn't this be fully qualified?
+      case n: NamedType => genID(qualifyNamedType(n).toTitleCase).toData
       case r: ReferenceType =>
         throw new ScroogeInternalException("ReferenceType should not appear in backend")
     }
@@ -218,7 +226,7 @@ class JavaGenerator extends Generator {
   def genFieldType(f: Field, mutable: Boolean = false): CodeFragment = {
     val code = if (f.requiredness.isOptional) {
       val baseType = genType(f.fieldType, mutable).toData
-      "ScroogeOption<" + baseType + ">"
+      "com.twitter.scrooge.Option<" + baseType + ">"
     } else {
       genPrimitiveType(f.fieldType).toData
     }
@@ -234,4 +242,10 @@ class JavaGenerator extends Generator {
   }
 
   def genBaseFinagleService = codify("Service<byte[], byte[]>")
+
+  def getParentFinagleService(p: ServiceParent): CodeFragment =
+    genID(SimpleID("FinagledService").addScope(getServiceParentID(p)))
+
+  def getParentFinagleClient(p: ServiceParent): CodeFragment =
+    genID(SimpleID("FinagledClient").addScope(getServiceParentID(p)))
 }

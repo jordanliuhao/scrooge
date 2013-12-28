@@ -1,30 +1,32 @@
 {{#public}}
 package {{package}}
 
-import com.twitter.scrooge.{ThriftStruct, ThriftStructCodec}
+import com.twitter.scrooge.{ThriftStruct, ThriftStructCodec3}
 import org.apache.thrift.protocol._
 import java.nio.ByteBuffer
-{{#withFinagleClient}}
-import com.twitter.finagle.SourcedException
-{{/withFinagleClient}}
-import scala.collection.mutable
+import java.util.Arrays
+import scala.collection.mutable.{
+  ArrayBuffer => mutable$ArrayBuffer, Buffer => mutable$Buffer,
+  HashMap => mutable$HashMap, HashSet => mutable$HashSet}
 import scala.collection.{Map, Set}
-{{#imports}}
-import {{parentpackage}}.{{{subpackage}} => {{_alias_}}}
-{{/imports}}
 
 {{/public}}
+@javax.annotation.Generated(value = Array("com.twitter.scrooge.Compiler"), date = "{{date}}")
 sealed trait {{StructName}} extends {{parentType}}
 
 {{docstring}}
-object {{StructName}} extends ThriftStructCodec[{{StructName}}] {
-  val Union = new TStruct("{{StructName}}")
+@javax.annotation.Generated(value = Array("com.twitter.scrooge.Compiler"), date = "{{date}}")
+object {{StructName}} extends ThriftStructCodec3[{{StructName}}] {
+  val Union = new TStruct("{{StructNameForWire}}")
 {{#fields}}
-  val {{fieldConst}} = new TField("{{fieldName}}", TType.{{constType}}, {{id}})
+  val {{fieldConst}} = new TField("{{fieldNameForWire}}", TType.{{constType}}, {{id}})
+{{#isEnum}}
+  private[this] val {{fieldConst}}I32 = new TField("{{fieldNameForWire}}", TType.I32, {{id}})
+{{/isEnum}}
 {{/fields}}
 
-  def encode(_item: {{StructName}}, _oprot: TProtocol) { _item.write(_oprot) }
-  def decode(_iprot: TProtocol): {{StructName}} = {
+  override def encode(_item: {{StructName}}, _oprot: TProtocol) { _item.write(_oprot) }
+  override def decode(_iprot: TProtocol): {{StructName}} = {
     var _result: {{StructName}} = null
     _iprot.readStructBegin()
     val _field = _iprot.readFieldBegin()

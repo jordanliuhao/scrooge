@@ -2,11 +2,11 @@
 
 package {{package}};
 
-import com.twitter.scrooge.ScroogeOption;
+import com.twitter.scrooge.Option;
 import com.twitter.scrooge.Utilities;
 import com.twitter.scrooge.ThriftStruct;
 import com.twitter.scrooge.ThriftStructCodec;
-import com.twitter.util.Function2;
+import com.twitter.scrooge.ThriftStructCodec3;
 import org.apache.thrift.protocol.*;
 import java.nio.ByteBuffer;
 import java.net.InetSocketAddress;
@@ -16,16 +16,14 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.Set;
 import java.util.HashSet;
-{{#imports}}
-import {{parentpackage}}.{{subpackage}}.*;
-{{/imports}}
 
 {{docstring}}
+@javax.annotation.Generated(value = "com.twitter.scrooge.Compiler", date = "{{date}}")
 public {{/public}}{{^public}}static {{/public}}class {{StructName}}{{#isException}} extends Exception{{/isException}} implements ThriftStruct {
-  private static final TStruct STRUCT = new TStruct("{{StructName}}");
+  private static final TStruct STRUCT = new TStruct("{{StructNameForWire}}");
 {{#fields}}
-  private static final TField {{fieldConst}} = new TField("{{fieldName}}", TType.{{constType}}, (short) {{id}});
-  final {{#optional}}ScroogeOption<{{fieldType}}>{{/optional}}{{^optional}}{{primitiveFieldType}}{{/optional}} {{fieldName}};
+  private static final TField {{fieldConst}} = new TField("{{fieldNameForWire}}", TType.{{constType}}, (short) {{id}});
+  final {{#optional}}Option<{{fieldType}}>{{/optional}}{{^optional}}{{primitiveFieldType}}{{/optional}} {{fieldName}};
 {{/fields}}
 
   public static class Builder {
@@ -56,7 +54,7 @@ public {{/public}}{{^public}}static {{/public}}class {{StructName}}{{#isExceptio
       return new {{StructName}}(
 {{#fields}}
 {{#optional}}
-      ScroogeOption.make(this.{{gotName}}, this.{{_fieldName}}){{/optional}}
+      Option.make(this.{{gotName}}, this.{{_fieldName}}){{/optional}}
 {{^optional}}
         this.{{_fieldName}}{{/optional}}
 {{/fields|,
@@ -77,7 +75,8 @@ public {{/public}}{{^public}}static {{/public}}class {{StructName}}{{#isExceptio
     return builder;
   }
 
-  public static ThriftStructCodec<{{StructName}}> CODEC = new ThriftStructCodec<{{StructName}}>() {
+  public static ThriftStructCodec<{{StructName}}> CODEC = new ThriftStructCodec3<{{StructName}}>() {
+    @Override
     public {{StructName}} decode(TProtocol _iprot) throws org.apache.thrift.TException {
       Builder builder = new Builder();
 {{#fields}}
@@ -112,6 +111,7 @@ public {{/public}}{{^public}}static {{/public}}class {{StructName}}{{#isExceptio
       }
     }
 
+    @Override
     public void encode({{StructName}} struct, TProtocol oprot) throws org.apache.thrift.TException {
       struct.write(oprot);
     }
@@ -127,7 +127,7 @@ public {{/public}}{{^public}}static {{/public}}class {{StructName}}{{#isExceptio
 
   public {{StructName}}(
 {{#fields}}
-    {{#optional}}ScroogeOption<{{fieldType}}>{{/optional}}{{^optional}}{{primitiveFieldType}}{{/optional}} {{fieldName}}
+    {{#optional}}Option<{{fieldType}}>{{/optional}}{{^optional}}{{primitiveFieldType}}{{/optional}} {{fieldName}}
 {{/fields|, }}
   ) {
 {{#fields}}
@@ -143,7 +143,7 @@ public {{/public}}{{^public}}static {{/public}}class {{StructName}}{{#isExceptio
   ) {
 {{#fields}}
 {{#optional}}
-    this.{{fieldName}} = ScroogeOption.none();
+    this.{{fieldName}} = Option.none();
 {{/optional}}
 {{^optional}}
     this.{{fieldName}} = {{fieldName}};

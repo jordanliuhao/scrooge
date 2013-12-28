@@ -22,30 +22,90 @@ import com.twitter.conversions.string._
 import com.twitter.scrooge.mustache.HandlebarLoader
 import com.twitter.scrooge.ast._
 import com.twitter.scrooge.mustache.Dictionary
-import com.twitter.scrooge.ScroogeInternalException
-
+import com.twitter.scrooge.java_generator.{ApacheJavaGeneratorFactory, ApacheJavaGenerator}
+import scala.collection.JavaConverters._
+import com.twitter.scrooge.frontend.{ScroogeInternalException, ResolvedDocument}
 
 abstract sealed class ServiceOption
 
-case object WithFinagleClient extends ServiceOption
-case object WithFinagleService extends ServiceOption
-case object WithOstrichServer extends ServiceOption
+case object WithFinagle extends ServiceOption
 case class JavaService(service: Service, options: Set[ServiceOption])
 
-abstract class Generator
-  extends StructTemplate with ServiceTemplate with ConstsTemplate with EnumTemplate
+trait ThriftGenerator {
+  def apply(
+    _doc: Document,
+    serviceOptions: Set[ServiceOption],
+    outputPath: File,
+    dryRun: Boolean = false): Iterable[File]
+}
+
+object Generator {
+  private[this] val Generators: Map[String, GeneratorFactory] = {
+    val klass = classOf[GeneratorFactory]
+    val generators =
+      List(JavaGeneratorFactory, ScalaGeneratorFactory, ApacheJavaGeneratorFactory) ++
+      java.util.ServiceLoader.load(klass, klass.getClassLoader).iterator().asScala
+    Map(generators map { g => (g.lang -> g) }: _*)
+  }
+
+  def languages = Generators.keys
+
+  def apply(
+    lan: String,
+    includeMap: Map[String, ResolvedDocument],
+    defaultNamespace: String,
+    generationDate: String,
+    experimentFlags: Seq[String]
+  ): ThriftGenerator = Generators.get(lan) match {
+    case Some(gen) => gen(includeMap, defaultNamespace, generationDate, experimentFlags)
+    case None => throw new Exception("Generator for language \"%s\" not found".format(lan))
+  }
+}
+
+trait GeneratorFactory {
+  def lang: String
+  def apply(
+    includeMap: Map[String, ResolvedDocument],
+    defaultNamespace: String,
+    generationDate: String,
+    experimentFlags: Seq[String]
+  ): ThriftGenerator
+}
+
+trait Generator
+  extends StructTemplate
+  with ServiceTemplate
+  with ConstsTemplate
+  with EnumTemplate
 {
   import Dictionary._
 
+  /**
+   * Map from included file names to the namespaces defined in those files.
+   */
+  val includeMap: Map[String, ResolvedDocument]
+  val defaultNamespace: String
+  val generationDate: String
+  val experimentFlags: Seq[String]
+
   /******************** helper functions ************************/
-  private[this] def namespacedFolder(destFolder: File, namespace: String) = {
+  private[this] def namespacedFolder(destFolder: File, namespace: String, dryRun: Boolean) = {
     val file = new File(destFolder, namespace.replace('.', File.separatorChar))
-    file.mkdirs()
+    if (!dryRun) file.mkdirs()
     file
   }
 
+  protected def getIncludeNamespace(includeFileName: String): Identifier = {
+    val javaNamespace = includeMap.get(includeFileName).flatMap {
+      doc: ResolvedDocument => doc.document.namespace("java")
+    }
+    javaNamespace.getOrElse(SimpleID(defaultNamespace))
+  }
+
   def normalizeCase[N <: Node](node: N): N
-  def getNamespace(doc0: Document): Identifier
+  def getNamespace(doc: Document): Identifier =
+    doc.namespace("java") getOrElse (SimpleID(defaultNamespace))
+
   val fileExtension: String
   val templateDirName: String
   lazy val templates = new HandlebarLoader(templateDirName, fileExtension)
@@ -75,7 +135,16 @@ abstract class Generator
   /**
    * get the ID of a service parent.  Java and Scala implementations are different.
    */
-  def getServiceParentID(parent: ServiceParent): Identifier
+  def getServiceParentID(parent: ServiceParent): Identifier = {
+    val identifier: Identifier with Product = parent.prefix match {
+      case Some(scope) => parent.sid.addScope(getIncludeNamespace(scope.name))
+      case None => parent.sid
+    }
+    identifier.toTitleCase
+  }
+
+  def getParentFinagleService(parent: ServiceParent): CodeFragment
+  def getParentFinagleClient(parent: ServiceParent): CodeFragment
 
   def isPrimitive(t: FunctionType): Boolean = {
     t match {
@@ -110,7 +179,7 @@ abstract class Generator
       case c@ListRHS(_) => genList(c, mutable)
       case c@SetRHS(_) => genSet(c, mutable)
       case c@MapRHS(_) => genMap(c, mutable)
-      case EnumRHS(enum, value) => genID(value.sid.addScope(enum.sid.toTitleCase))
+      case c: EnumRHS => genEnum(c)
       case iv@IdRHS(id) => genID(id)
     }
   }
@@ -120,6 +189,8 @@ abstract class Generator
   def genSet(set: SetRHS, mutable: Boolean = false): CodeFragment
 
   def genMap(map: MapRHS, mutable: Boolean = false): CodeFragment
+
+  def genEnum(enum: EnumRHS): CodeFragment
 
   /**
    * The default value for the specified type and mutability.
@@ -166,7 +237,7 @@ abstract class Generator
       case TString => "STRING"
       case TBinary => "STRING" // thrift's idea of "string" is based on old broken c++ semantics.
       case StructType(_, _) => "STRUCT"
-      case EnumType(_, _) => "I32" // enums are converted to ints
+      case EnumType(_, _) => "ENUM"
       case MapType(_, _, _) => "MAP"
       case SetType(_, _) => "SET"
       case ListType(_, _) => "LIST"
@@ -174,6 +245,16 @@ abstract class Generator
     }
     codify(code)
   }
+
+  /**
+   * When a named type is imported via include statement, we need to
+   * qualify it using its full namespace
+   */
+  def qualifyNamedType(t: NamedType): Identifier =
+    t.scopePrefix match {
+      case Some(scope) => t.sid.addScope(getIncludeNamespace(scope.name))
+      case None => t.sid
+    }
 
   def genProtocolReadMethod(t: FunctionType): CodeFragment = {
     val code = t match {
@@ -227,76 +308,94 @@ abstract class Generator
 
   def genBaseFinagleService: CodeFragment
 
-  /**
-   * Creates a sequence of dictionaries describing aliased imports.
-   */
-  protected def importsDicts(includes: Seq[Include]) = {
-    includes map { include =>
-      val id = getNamespace(include.document)
-      val prefix = include.prefix
+  def finagleClientFile(
+    packageDir: File,
+    service: Service, options:
+    Set[ServiceOption]
+  ): Option[File] =
+    None
 
-      val (parentPackage, subPackage) = id match {
-        case sid: SimpleID => (SimpleID("_root_"), sid)
-        case qid: QualifiedID => (qid.qualifier, qid.name)
-      }
-
-      Dictionary(
-        "parentpackage" -> genID(parentPackage),
-        "subpackage" -> genID(subPackage),
-        "_alias_" -> genID(prefix.prepend("_").append("_"))
-      )
-    }
-  }
+  def finagleServiceFile(
+    packageDir: File,
+    service: Service, options:
+    Set[ServiceOption]
+  ): Option[File] =
+    None
 
   // main entry
   def apply(
     _doc: Document,
     serviceOptions: Set[ServiceOption],
-    outputPath: File): Iterable[File]
-  = {
+    outputPath: File,
+    dryRun: Boolean = false
+  ): Iterable[File] = {
     val generatedFiles = new mutable.ListBuffer[File]
     val doc = normalizeCase(_doc)
     val namespace = getNamespace(_doc)
-    val packageDir = namespacedFolder(outputPath, namespace.fullName)
+    val packageDir = namespacedFolder(outputPath, namespace.fullName, dryRun)
     val includes = doc.headers.collect {
       case x@ Include(_, doc) => x
     }
 
     if (doc.consts.nonEmpty) {
       val file = new File(packageDir, "Constants" + fileExtension)
-      val dict = constDict(namespace, doc.consts)
-      writeFile(file, templates.header, templates("consts").generate(dict))
+      if (!dryRun) {
+        val dict = constDict(namespace, doc.consts)
+        writeFile(file, templates.header, templates("consts").generate(dict))
+      }
       generatedFiles += file
     }
 
     doc.enums.foreach {
       enum =>
         val file = new File(packageDir, enum.sid.toTitleCase.name + fileExtension)
-        val dict = enumDict(namespace, enum)
-        writeFile(file, templates.header, templates("enum").generate(dict))
+        if (!dryRun) {
+          val dict = enumDict(namespace, enum)
+          writeFile(file, templates.header, templates("enum").generate(dict))
+        }
         generatedFiles += file
     }
 
     doc.structs.foreach {
       struct =>
-        val templateName =
-          struct match {
-            case _: Union => "union"
-            case _ => "struct"
-          }
-
         val file = new File(packageDir, struct.sid.toTitleCase.name + fileExtension)
-        val dict = structDict(struct, Some(namespace), includes, serviceOptions)
-        writeFile(file, templates.header, templates(templateName).generate(dict))
+
+        if (!dryRun) {
+          val templateName =
+            struct match {
+              case _: Union => "union"
+              case _ => "struct"
+            }
+
+          val dict = structDict(struct, Some(namespace), includes, serviceOptions)
+          writeFile(file, templates.header, templates(templateName).generate(dict))
+        }
         generatedFiles += file
     }
 
     doc.services.foreach {
       service =>
-        val file = new File(packageDir, service.sid.toTitleCase.name + fileExtension)
-        val dict = serviceDict(JavaService(service, serviceOptions), namespace, includes, serviceOptions)
-        writeFile(file, templates.header, templates("service").generate(dict))
-        generatedFiles += file
+        val interfaceFile = new File(packageDir, service.sid.toTitleCase.name + fileExtension)
+        val finagleClientFileOpt = finagleClientFile(packageDir, service, serviceOptions)
+        val finagleServiceFileOpt = finagleServiceFile(packageDir, service, serviceOptions)
+
+        if (!dryRun) {
+          val dict = serviceDict(service, namespace, includes, serviceOptions)
+          writeFile(interfaceFile, templates.header, templates("service").generate(dict))
+
+          finagleClientFileOpt foreach { file =>
+            val dict = finagleClient(service, namespace)
+            writeFile(file, templates.header, templates("finagleClient").generate(dict))
+          }
+
+          finagleServiceFileOpt foreach { file =>
+            val dict = finagleService(service, namespace)
+            writeFile(file, templates.header, templates("finagleService").generate(dict))
+          }
+        }
+        generatedFiles += interfaceFile
+        generatedFiles ++= finagleServiceFileOpt
+        generatedFiles ++= finagleClientFileOpt
     }
 
     generatedFiles

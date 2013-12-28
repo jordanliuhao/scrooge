@@ -22,8 +22,8 @@ import com.twitter.scrooge.mustache.Dictionary._
 
 trait ServiceTemplate {
   self: Generator =>
-  def toDictionary(function: Function, async: Boolean): Dictionary = {
-    val hasThrows = !async && function.throws.size > 0
+  def toDictionary(function: Function, generic: Option[String]): Dictionary = {
+    val hasThrows = generic.isEmpty && function.throws.size > 0
     val throwsDictionaries =
       if (hasThrows) {
         function.throws map {
@@ -34,7 +34,7 @@ trait ServiceTemplate {
         Nil
       }
     Dictionary(
-      "async" -> v(async),
+      "generic" -> v(generic.map(codify)),
       "docstring" -> codify(function.docstring.getOrElse("")),
       "hasThrows" -> v(hasThrows),
       "throws" -> v(throwsDictionaries),
@@ -44,39 +44,68 @@ trait ServiceTemplate {
     )
   }
 
-  def serviceFunctionArgsStruct(f: Function): FunctionArgs = {
-    FunctionArgs(f.funcName.append("_args"), f.args)
+  def internalArgsStruct(f:Function): FunctionArgs = {
+    FunctionArgs(internalArgsStructName(f),
+      internalArgsStructNameForWire(f),
+      f.args)
   }
 
-  def serviceFunctionResultStruct(f: Function): FunctionResult = {
+  def internalResultStruct(f:Function): FunctionResult = {
     val throws = f.throws map {
       _.copy(requiredness = Requiredness.Optional)
     }
     val success = f.funcType match {
       case Void => Nil
+      case OnewayVoid => Nil
       case fieldType: FieldType =>
-        Seq(Field(0, SimpleID("success"), fieldType, None, Requiredness.Optional))
+        Seq(Field(0, SimpleID("success"), "success", fieldType, None, Requiredness.Optional))
     }
-    FunctionResult(f.funcName.append("_result"), success ++ throws)
+    FunctionResult(internalResultStructName(f),
+      internalResultStructNameForWire(f),
+      success ++ throws)
   }
 
-  def finagleClient(s: Service) = {
+  def internalArgsStructName(f: Function): SimpleID =
+    f.funcName.toCamelCase.append("$").append("args")
+
+  /**
+   * The name used in RPC request, this needs to be same as Apache compiler
+   */
+  def internalArgsStructNameForWire(f: Function): String =
+    f.funcName.name + "_args"
+
+  def internalResultStructName(f: Function): SimpleID =
+    f.funcName.toCamelCase.append("$").append("result")
+
+  /**
+   * The name used in RPC request, this needs to be same as Apache compiler
+   */
+  def internalResultStructNameForWire(f: Function): String =
+    f.funcName.name + "_result"
+
+  def finagleClient(
+    service: Service,
+    namespace: Identifier
+  ) =
     Dictionary(
-      "hasParent" -> v(s.parent.isDefined),
-      "finagleClientParent" -> s.parent.map { p =>
-        genID(SimpleID("FinagledClient").addScope(getServiceParentID(p)))
-      }.getOrElse {codify("")},
-      "functions" -> v(s.functions.map {
+      "package" -> genID(namespace),
+      "ServiceName" -> genID(service.sid.toTitleCase),
+      "date" -> codify(generationDate),
+      "docstring" -> codify(service.docstring.getOrElse("")),
+      "hasParent" -> v(service.parent.isDefined),
+      "finagleClientParent" ->
+        service.parent.map(getParentFinagleClient).getOrElse(codify("")),
+      "functions" -> v(service.functions.map {
         f =>
           Dictionary(
             "header" -> v(templates("function")),
-            "headerInfo" -> v(toDictionary(f, true)),
-            "clientFuncName" -> genID(f.funcName.toCamelCase),
+            "headerInfo" -> v(toDictionary(f, Some("Future"))),
+            "clientFuncNameForWire" -> codify(f.originalName),
             "__stats_name" -> genID(f.funcName.toCamelCase.prepend("__stats_")),
             "type" -> genType(f.funcType),
-            "void" -> v(f.funcType eq Void),
-            "ArgsStruct" -> genID(f.funcName.append("Args").toTitleCase),
-            "ResultStruct" -> genID(f.funcName.append("Result").toTitleCase),
+            "isVoid" -> v(f.funcType == Void || f.funcType == OnewayVoid),
+            "ArgsStruct" -> genID(internalArgsStructName(f)),
+            "ResultStruct" -> genID(internalResultStructName(f)),
             "argNames" -> {
               val code = f.args.map { field => genID(field.sid).toData }.mkString(", ")
               codify(code)
@@ -89,30 +118,35 @@ trait ServiceTemplate {
       }),
       "function" -> v(templates("finagleClientFunction"))
     )
-  }
 
-  def finagleService(s: Service) = {
+  def finagleService(
+    service: Service,
+    namespace: Identifier
+  ) =
     Dictionary(
-      "hasParent" -> v(s.parent.isDefined),
-      "finagleServiceParent" -> {s.parent match {
-        case Some(p) =>
-          genID(SimpleID("FinagledService").addScope(getServiceParentID(p)))
-        case None => genBaseFinagleService
-      }},
+      "package" -> genID(namespace),
+      "ServiceName" -> genID(service.sid.toTitleCase),
+      "date" -> codify(generationDate),
+      "docstring" -> codify(service.docstring.getOrElse("")),
+      "hasParent" -> v(service.parent.isDefined),
+      "finagleServiceParent" ->
+        service.parent.map(getParentFinagleService).getOrElse(genBaseFinagleService),
       "function" -> v(templates("finagleServiceFunction")),
-      "functions" -> v(s.functions map {
+      "functions" -> v(service.functions map {
         f =>
           Dictionary(
-            "serviceFuncName" -> genID(f.funcName.toCamelCase),
-            "ArgsStruct" -> genID(f.funcName.append("Args").toTitleCase),
-            "ResultStruct" -> genID(f.funcName.append("Result").toTitleCase),
+            "serviceFuncNameForCompile" -> genID(f.funcName.toCamelCase),
+            "serviceFuncNameForWire" -> codify(f.originalName),
+            "ArgsStruct" -> genID(internalArgsStructName(f)),
+            "ResultStruct" -> genID(internalResultStructName(f)),
             "argNames" ->
               codify(f.args map { field =>
                 "args." + genID(field.sid).toData
               } mkString (", ")),
             "typeName" -> genType(f.funcType),
-            "isVoid" -> v(f.funcType eq Void),
-            "resultNamedArg" -> codify(if (f.funcType ne Void) "success = Some(value)" else ""),
+            "isVoid" -> v(f.funcType == Void || f.funcType == OnewayVoid),
+            "resultNamedArg" ->
+              codify(if (f.funcType != Void && f.funcType != OnewayVoid) "success = Some(value)" else ""),
             "exceptions" -> v(f.throws map {
               t =>
                 Dictionary(
@@ -123,62 +157,56 @@ trait ServiceTemplate {
           )
       })
     )
-  }
-
-  def ostrichService(s: Service) = Dictionary()
 
   def serviceDict(
-    s: JavaService,
+    service: Service,
     namespace: Identifier,
     includes: Seq[Include],
-    serviceOptions: Set[ServiceOption]
+    options: Set[ServiceOption]
   ) = {
-    val service = s.service
-
+    val withFinagle = options.contains(WithFinagle)
     Dictionary(
       "function" -> v(templates("function")),
       "package" -> genID(namespace),
-      "imports" -> v(importsDicts(includes)),
       "ServiceName" -> genID(service.sid.toTitleCase),
       "docstring" -> codify(service.docstring.getOrElse("")),
-      "syncExtends" -> codify(service.parent.map { p =>
-          "extends " + genID(getServiceParentID(p)) + ".Iface "
-        }.getOrElse("")),
-      "asyncExtends" -> codify(service.parent.map { p =>
-        "extends " + genID(getServiceParentID(p)) + ".FutureIface "
-      }.getOrElse("")),
+      "syncParent" -> v(service.parent.map { p =>
+        genID(getServiceParentID(p)).append(".Iface")
+      }),
+      "futureIfaceParent" -> v(service.parent.map { p =>
+        genID(getServiceParentID(p)).append(".FutureIface")
+      }),
+      "genericParent" -> service.parent.map { p =>
+        genID(getServiceParentID(p)).append("[MM]")
+      }.getOrElse(codify("ThriftService")),
       "syncFunctions" -> v(service.functions.map {
-        f => toDictionary(f, false)
+        f => toDictionary(f, None)
       }),
       "asyncFunctions" -> v(service.functions.map {
-        f => toDictionary(f, true)
+        f => toDictionary(f, Some("Future"))
+      }),
+      "genericFunctions" -> v(service.functions.map {
+        f => toDictionary(f, Some("MM"))
       }),
       "struct" -> v(templates("struct")),
-      "structs" -> v(
-        service.functions flatMap {
-          f =>
-            Seq(serviceFunctionArgsStruct(f), serviceFunctionResultStruct(f))
-        } map {
-          struct =>
-            structDict(struct, None, includes, serviceOptions)
-        }),
-      "finagleClient" -> v(templates("finagleClient")),
-      "finagleService" -> v(templates("finagleService")),
-      "ostrichServer" -> v(templates("ostrichService")),
+      "internalStructs" -> v(service.functions.map { f =>
+        Dictionary(
+          "internalArgsStruct" -> v(structDict(
+            internalArgsStruct(f),
+            None, includes, options)),
+          "internalResultStruct" -> v(structDict(
+            internalResultStruct(f),
+            None, includes, options))
+        )
+      }),
       "finagleClients" -> v(
-        if (s.options contains WithFinagleClient) Seq(finagleClient(service)) else Seq()
+        if (withFinagle) Seq(finagleClient(service, namespace)) else Seq()
       ),
       "finagleServices" -> v(
-        if (s.options contains WithFinagleService) Seq(finagleService(service)) else Seq()
+        if (withFinagle) Seq(finagleService(service, namespace)) else Seq()
       ),
-      "ostrichServers" -> v(
-        if (s.options contains WithOstrichServer) Seq(ostrichService(service)) else Seq()
-      ),
-      "withFinagleClient" -> v(s.options contains WithFinagleService),
-      "withFinagleService" -> v(s.options contains WithFinagleService),
-      "withOstrichServer" -> v(s.options contains WithOstrichServer),
-      "withFinagle" -> v((s.options contains WithFinagleClient)
-        || (s.options contains WithFinagleService))
+      "withFinagle" -> v(withFinagle),
+      "date" -> codify(generationDate)
     )
   }
 }

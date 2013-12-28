@@ -3,14 +3,16 @@ package com.twitter.scrooge.backend
 import java.io.{ObjectInputStream, ByteArrayInputStream, ObjectOutputStream, ByteArrayOutputStream}
 import java.nio.ByteBuffer
 import org.apache.thrift.protocol._
+import org.apache.thrift.transport.TMemoryBuffer
 import org.specs.mock.{ClassMocker, JMocker}
 import org.specs.SpecificationWithJUnit
+import com.twitter.finagle.SourcedException
+import com.twitter.scrooge.testutil.EvalHelper
+import com.twitter.scrooge.{ThriftStruct, ThriftException}
 import thrift.test._
 import thrift.test1._
 import thrift.test2._
 import thrift.`def`.default._
-import com.twitter.scrooge.{ThriftStruct, ThriftException, EvalHelper}
-import com.twitter.finagle.SourcedException
 
 class ScalaGeneratorSpec extends SpecificationWithJUnit with EvalHelper with JMocker with ClassMocker {
   val protocol = mock[TProtocol]
@@ -20,81 +22,199 @@ class ScalaGeneratorSpec extends SpecificationWithJUnit with EvalHelper with JMo
   "ScalaGenerator" should {
     "generate an enum" in {
       "correct constants" in {
-        NumberId.One.getValue mustEqual 1
-        NumberId.Two.getValue mustEqual 2
-        NumberId.Three.getValue mustEqual 3
-        NumberId.Five.getValue mustEqual 5
-        NumberId.Six.getValue mustEqual 6
-        NumberId.Eight.getValue mustEqual 8
+        NumberID.One.getValue mustEqual 1
+        NumberID.Two.getValue mustEqual 2
+        NumberID.Three.getValue mustEqual 3
+        NumberID.Five.getValue mustEqual 5
+        NumberID.Six.getValue mustEqual 6
+        NumberID.Eight.getValue mustEqual 8
       }
 
       "correct names" in {
-        NumberId.One.name mustEqual "One"
-        NumberId.Two.name mustEqual "Two"
-        NumberId.Three.name mustEqual "Three"
-        NumberId.Five.name mustEqual "Five"
-        NumberId.Six.name mustEqual "Six"
-        NumberId.Eight.name mustEqual "Eight"
+        NumberID.One.name mustEqual "One"
+        NumberID.Two.name mustEqual "Two"
+        NumberID.Three.name mustEqual "Three"
+        NumberID.Five.name mustEqual "Five"
+        NumberID.Six.name mustEqual "Six"
+        NumberID.Eight.name mustEqual "Eight"
       }
 
       "apply" in {
-        NumberId(1) mustEqual NumberId.One
-        NumberId(2) mustEqual NumberId.Two
-        NumberId(3) mustEqual NumberId.Three
-        NumberId(5) mustEqual NumberId.Five
-        NumberId(6) mustEqual NumberId.Six
-        NumberId(8) mustEqual NumberId.Eight
+        NumberID(1) mustEqual NumberID.One
+        NumberID(2) mustEqual NumberID.Two
+        NumberID(3) mustEqual NumberID.Three
+        NumberID(5) mustEqual NumberID.Five
+        NumberID(6) mustEqual NumberID.Six
+        NumberID(8) mustEqual NumberID.Eight
       }
 
       "get" in {
-        NumberId.get(1) must beSome(NumberId.One)
-        NumberId.get(2) must beSome(NumberId.Two)
-        NumberId.get(3) must beSome(NumberId.Three)
-        NumberId.get(5) must beSome(NumberId.Five)
-        NumberId.get(6) must beSome(NumberId.Six)
-        NumberId.get(8) must beSome(NumberId.Eight)
-        NumberId.get(10) must beNone
+        NumberID.get(1) must beSome(NumberID.One)
+        NumberID.get(2) must beSome(NumberID.Two)
+        NumberID.get(3) must beSome(NumberID.Three)
+        NumberID.get(5) must beSome(NumberID.Five)
+        NumberID.get(6) must beSome(NumberID.Six)
+        NumberID.get(8) must beSome(NumberID.Eight)
+        NumberID.get(10) must beNone
       }
 
       "valueOf" in {
-        NumberId.valueOf("One") must beSome(NumberId.One)
-        NumberId.valueOf("Two") must beSome(NumberId.Two)
-        NumberId.valueOf("Three") must beSome(NumberId.Three)
-        NumberId.valueOf("Five") must beSome(NumberId.Five)
-        NumberId.valueOf("Six") must beSome(NumberId.Six)
-        NumberId.valueOf("Eight") must beSome(NumberId.Eight)
-        NumberId.valueOf("Ten") must beNone
+        NumberID.valueOf("One") must beSome(NumberID.One)
+        NumberID.valueOf("Two") must beSome(NumberID.Two)
+        NumberID.valueOf("Three") must beSome(NumberID.Three)
+        NumberID.valueOf("Five") must beSome(NumberID.Five)
+        NumberID.valueOf("Six") must beSome(NumberID.Six)
+        NumberID.valueOf("Eight") must beSome(NumberID.Eight)
+        NumberID.valueOf("Ten") must beNone
+      }
+
+      "correct list" in {
+        NumberID.list(0) mustEqual NumberID.One
+        NumberID.list(1) mustEqual NumberID.Two
+        NumberID.list(2) mustEqual NumberID.Three
+        NumberID.list(3) mustEqual NumberID.Five
+        NumberID.list(4) mustEqual NumberID.Six
+        NumberID.list(5) mustEqual NumberID.Eight
+        NumberID.list.size mustEqual 6
       }
 
       "java-serializable" in {
         val bos = new ByteArrayOutputStream()
         val out = new ObjectOutputStream(bos)
-        out.writeObject(NumberId.One)
-        out.writeObject(NumberId.Two)
+        out.writeObject(NumberID.One)
+        out.writeObject(NumberID.Two)
         bos.close()
         val bytes = bos.toByteArray
 
         val in = new ObjectInputStream(new ByteArrayInputStream(bytes))
         var obj = in.readObject()
-        obj.isInstanceOf[NumberId] must beTrue
-        obj.asInstanceOf[NumberId].getValue mustEqual NumberId.One.getValue
-        obj.asInstanceOf[NumberId].name mustEqual NumberId.One.name
+        obj.isInstanceOf[NumberID] must beTrue
+        obj.asInstanceOf[NumberID].getValue mustEqual NumberID.One.getValue
+        obj.asInstanceOf[NumberID].name mustEqual NumberID.One.name
 
         obj = in.readObject()
-        obj.isInstanceOf[NumberId] must beTrue
-        obj.asInstanceOf[NumberId].getValue mustEqual NumberId.Two.getValue
-        obj.asInstanceOf[NumberId].name mustEqual NumberId.Two.name
+        obj.isInstanceOf[NumberID] must beTrue
+        obj.asInstanceOf[NumberID].getValue mustEqual NumberID.Two.getValue
+        obj.asInstanceOf[NumberID].name mustEqual NumberID.Two.name
+      }
+
+      "handle namespace collisions" in {
+        NamespaceCollisions.List.name mustEqual "List"
+        NamespaceCollisions.Any.name mustEqual "Any"
+        NamespaceCollisions.AnyRef.name mustEqual "AnyRef"
+        NamespaceCollisions.Object.name mustEqual "Object"
+        NamespaceCollisions.String.name mustEqual "String"
+        NamespaceCollisions.Byte.name mustEqual "Byte"
+        NamespaceCollisions.Short.name mustEqual "Short"
+        NamespaceCollisions.Char.name mustEqual "Char"
+        NamespaceCollisions.Int.name mustEqual "Int"
+        NamespaceCollisions.Long.name mustEqual "Long"
+        NamespaceCollisions.Float.name mustEqual "Float"
+        NamespaceCollisions.Double.name mustEqual "Double"
+        NamespaceCollisions.Option.name mustEqual "Option"
+        NamespaceCollisions.None.name mustEqual "None"
+        NamespaceCollisions.Some.name mustEqual "Some"
+        NamespaceCollisions.Nil.name mustEqual "Nil"
+        NamespaceCollisions.Null.name mustEqual "Null"
+        NamespaceCollisions.Set.name mustEqual "Set"
+        NamespaceCollisions.Map.name mustEqual "Map"
+        NamespaceCollisions.Seq.name mustEqual "Seq"
+        NamespaceCollisions.Array.name mustEqual "Array"
+        NamespaceCollisions.Iterable.name mustEqual "Iterable"
+        NamespaceCollisions.Unit.name mustEqual "Unit"
+        NamespaceCollisions.Nothing.name mustEqual "Nothing"
+        NamespaceCollisions.Protected.name mustEqual "Protected"
+
+        NamespaceCollisions.valueOf("null") must beSome(NamespaceCollisions.Null)
+        NamespaceCollisions.valueOf("protected") must beSome(NamespaceCollisions.Protected)
+      }
+
+      "encode-decode in struct" in {
+        val prot = new TBinaryProtocol(new TMemoryBuffer(64))
+        val eStruct = EnumStruct(NumberID.One)
+        EnumStruct.encode(eStruct, prot)
+        EnumStruct.decode(prot) mustEqual eStruct
+      }
+
+      "encode-decode in union" in {
+        val prot = new TBinaryProtocol(new TMemoryBuffer(64))
+        val eUnion = EnumUnion.Number(NumberID.One)
+        EnumUnion.encode(eUnion, prot)
+        EnumUnion.decode(prot) mustEqual eUnion
+      }
+
+      "be identified as an ENUM" in {
+        EnumStruct.NumberField.`type` mustEqual TType.ENUM
+      }
+
+      "be identified as an I32 on the wire for structs" in {
+        val prot = new TBinaryProtocol(new TMemoryBuffer(64))
+        EnumStruct.encode(EnumStruct(NumberID.One), prot)
+        prot.readStructBegin()
+        val field = prot.readFieldBegin()
+        field.`type` mustEqual TType.I32
+      }
+
+      "be identified as an I32 on the wire for unions" in {
+        val prot = new TBinaryProtocol(new TMemoryBuffer(64))
+        EnumUnion.encode(EnumUnion.Number(NumberID.One), prot)
+        prot.readStructBegin()
+        val field = prot.readFieldBegin()
+        field.`type` mustEqual TType.I32
+      }
+
+      "be identified as I32 on the wire for collections" in {
+        val prot = new TBinaryProtocol(new TMemoryBuffer(64))
+        val eStruct = EnumCollections(
+          aMap = Map(NumberID.One -> NumberID.Two),
+          aList = List(NumberID.One),
+          aSet = Set(NumberID.One))
+
+        EnumCollections.encode(eStruct, prot)
+        EnumCollections.decode(prot) mustEqual eStruct
+
+        EnumCollections.encode(eStruct, prot)
+
+        prot.readStructBegin()
+
+        // Test Map encoding
+        prot.readFieldBegin()
+        val mapField = prot.readMapBegin()
+        mapField.keyType mustEqual TType.I32
+        mapField.valueType mustEqual TType.I32
+        prot.readI32(); prot.readI32()
+        prot.readMapEnd()
+        prot.readFieldEnd()
+
+        // Test List encoding
+        prot.readFieldBegin()
+        val listField = prot.readListBegin()
+        listField.elemType mustEqual TType.I32
+        prot.readI32()
+        prot.readListEnd()
+        prot.readFieldEnd()
+
+        // Test Set encoding
+        prot.readFieldBegin()
+        val setField = prot.readSetBegin()
+        setField.elemType mustEqual TType.I32
       }
     }
 
     "generate constants" in {
-      thrift.test.Constants.myNumberID mustEqual NumberId.One
+      thrift.test.Constants.myWfhDay mustEqual WeekDay.Thu
+      thrift.test.Constants.myDaysOut mustEqual List(WeekDay.Thu, WeekDay.Sat, WeekDay.SUN)
       thrift.test.Constants.name mustEqual "Columbo"
       thrift.test.Constants.someInt mustEqual 1
       thrift.test.Constants.someDouble mustEqual 3.0
       thrift.test.Constants.someList mustEqual List("piggy")
       thrift.test.Constants.emptyList mustEqual List()
       thrift.test.Constants.someMap mustEqual Map("foo" -> "bar")
+      thrift.test.Constants.someSimpleSet mustEqual Set("foo", "bar")
+      thrift.test.Constants.someSet mustEqual Set(
+        List("piggy"),
+        List("kitty")
+      )
     }
 
     "basic structs" in {
@@ -110,7 +230,7 @@ class ScalaGeneratorSpec extends SpecificationWithJUnit with EvalHelper with JMo
             endRead(protocol)
           }
 
-          Ints(protocol) mustEqual Ints(16, 32, 64L)
+          Ints.decode(protocol) mustEqual Ints(16, 32, 64L)
         }
 
         "write" in {
@@ -138,7 +258,7 @@ class ScalaGeneratorSpec extends SpecificationWithJUnit with EvalHelper with JMo
             endRead(protocol)
           }
 
-          val bytes = Bytes(protocol)
+          val bytes = Bytes.decode(protocol)
           bytes.x mustEqual 3.toByte
           new String(bytes.y.array) mustEqual "hello"
         }
@@ -168,7 +288,7 @@ class ScalaGeneratorSpec extends SpecificationWithJUnit with EvalHelper with JMo
             endRead(protocol)
           }
 
-          Misc(protocol) mustEqual Misc(true, 3.14, "bender")
+          Misc.decode(protocol) mustEqual Misc(true, 3.14, "bender")
         }
 
         "write" in {
@@ -219,7 +339,7 @@ class ScalaGeneratorSpec extends SpecificationWithJUnit with EvalHelper with JMo
             endRead(protocol)
           }
 
-          Compound(protocol) mustEqual exemplar
+          Compound.decode(protocol) mustEqual exemplar
         }
 
         "write" in {
@@ -262,7 +382,7 @@ class ScalaGeneratorSpec extends SpecificationWithJUnit with EvalHelper with JMo
             endRead(protocol)
           }
 
-          RequiredString(protocol) mustEqual RequiredString("yo")
+          RequiredString.decode(protocol) mustEqual RequiredString("yo")
         }
 
         "missing required value throws exception during deserialization" in {
@@ -273,11 +393,11 @@ class ScalaGeneratorSpec extends SpecificationWithJUnit with EvalHelper with JMo
           }
 
           "with no default value" in {
-            RequiredString(protocol) must throwA[TProtocolException]
+            RequiredString.decode(protocol) must throwA[TProtocolException]
           }
 
           "with default value" in {
-            RequiredStringWithDefault(protocol) must throwA[TProtocolException]
+            RequiredStringWithDefault.decode(protocol) must throwA[TProtocolException]
           }
         }
 
@@ -302,7 +422,7 @@ class ScalaGeneratorSpec extends SpecificationWithJUnit with EvalHelper with JMo
             endRead(protocol)
           }
 
-          OptionalInt(protocol) mustEqual OptionalInt("Commie", Some(14))
+          OptionalInt.decode(protocol) mustEqual OptionalInt("Commie", Some(14))
         }
 
         "read with missing field" in {
@@ -312,7 +432,7 @@ class ScalaGeneratorSpec extends SpecificationWithJUnit with EvalHelper with JMo
             endRead(protocol)
           }
 
-          OptionalInt(protocol) mustEqual OptionalInt("Commie", None)
+          OptionalInt.decode(protocol) mustEqual OptionalInt("Commie", None)
         }
 
         "write" in {
@@ -346,7 +466,7 @@ class ScalaGeneratorSpec extends SpecificationWithJUnit with EvalHelper with JMo
             one(protocol).readStructEnd()
           }
 
-          DefaultValues(protocol) mustEqual DefaultValues("leela")
+          DefaultValues.decode(protocol) mustEqual DefaultValues("leela")
         }
 
         "read with value present" in {
@@ -358,7 +478,7 @@ class ScalaGeneratorSpec extends SpecificationWithJUnit with EvalHelper with JMo
             one(protocol).readStructEnd()
           }
 
-          DefaultValues(protocol) mustEqual DefaultValues("delilah")
+          DefaultValues.decode(protocol) mustEqual DefaultValues("delilah")
         }
       }
 
@@ -385,7 +505,7 @@ class ScalaGeneratorSpec extends SpecificationWithJUnit with EvalHelper with JMo
             endRead(protocol)
           }
 
-          Empire(protocol) mustEqual Empire(
+          Empire.decode(protocol) mustEqual Empire(
             "United States of America",
             List("connecticut", "california"),
             Emperor("Bush", 42))
@@ -485,7 +605,7 @@ class ScalaGeneratorSpec extends SpecificationWithJUnit with EvalHelper with JMo
             emptyRead(protocol)
           }
 
-          Bird(protocol) must throwA[TProtocolException]
+          Bird.decode(protocol) must throwA[TProtocolException]
         }
 
         "write" in {
@@ -501,7 +621,7 @@ class ScalaGeneratorSpec extends SpecificationWithJUnit with EvalHelper with JMo
             endRead(protocol)
           }
 
-          Bird(protocol) mustEqual Bird.Hummingbird("Ruby-Throated")
+          Bird.decode(protocol) mustEqual Bird.Hummingbird("Ruby-Throated")
         }
 
         "write" in {
@@ -525,7 +645,7 @@ class ScalaGeneratorSpec extends SpecificationWithJUnit with EvalHelper with JMo
             endRead(protocol)
           }
 
-          Bird(protocol) must throwA[TProtocolException]
+          Bird.decode(protocol) must throwA[TProtocolException]
         }
 
         // no write test because it's not possible
@@ -543,7 +663,7 @@ class ScalaGeneratorSpec extends SpecificationWithJUnit with EvalHelper with JMo
             endRead(protocol)
           }
 
-          Bird(protocol) mustEqual Bird.Raptor(Raptor(false, "peregrine"))
+          Bird.decode(protocol) mustEqual Bird.Raptor(Raptor(false, "peregrine"))
         }
 
         "write" in {
@@ -573,7 +693,7 @@ class ScalaGeneratorSpec extends SpecificationWithJUnit with EvalHelper with JMo
             endRead(protocol)
           }
 
-          Bird(protocol) mustEqual Bird.Flock(List("starling", "kestrel", "warbler"))
+          Bird.decode(protocol) mustEqual Bird.Flock(List("starling", "kestrel", "warbler"))
         }
 
         "write" in {
@@ -594,15 +714,165 @@ class ScalaGeneratorSpec extends SpecificationWithJUnit with EvalHelper with JMo
       "default value" in {
         Bird.Hummingbird() mustEqual Bird.Hummingbird("Calypte anna")
       }
+
+      "primitive field type" in {
+        import thrift.`def`.default._
+        val protocol = new TBinaryProtocol(new TMemoryBuffer(10000))
+        var original: NaughtyUnion = NaughtyUnion.Value(1)
+        NaughtyUnion.encode(original, protocol)
+        NaughtyUnion.decode(protocol) mustEqual(original)
+        original = NaughtyUnion.Flag(true)
+        NaughtyUnion.encode(original, protocol)
+        NaughtyUnion.decode(protocol) mustEqual(original)
+        original = NaughtyUnion.Text("false")
+        NaughtyUnion.encode(original, protocol)
+        NaughtyUnion.decode(protocol) mustEqual(original)
+      }
     }
 
     "typedef relative fields" in {
-      val candy = Candy(100, CandyType.Delicious)
+      val candy = Candy(100, CandyType.DeliCIous)
       candy.sweetnessIso mustEqual 100
       candy.candyType.value mustEqual 1
       candy.brand mustEqual "Hershey"
       candy.count mustEqual 10
       candy.headline mustEqual "Life is short, eat dessert first"
+    }
+
+    "hide internal helper function to avoid naming conflict" in {
+      import thrift.`def`.default._
+      val impl = new NaughtyService[Some] {
+        def foo() = Some(FooResult("dummy message"))
+      }
+      impl.foo().get.message mustEqual("dummy message")
+    }
+
+    "pass through fields" in {
+      "pass through" in {
+        val pt2 = PassThrough2(1, 2)
+
+        val pt1 = {
+          val protocol = new TBinaryProtocol(new TMemoryBuffer(256))
+          PassThrough2.encode(pt2, protocol)
+          PassThrough.decode(protocol)
+        }
+
+        val pt2roundTripped = {
+          val protocol = new TBinaryProtocol(new TMemoryBuffer(256))
+          PassThrough.encode(pt1, protocol)
+          PassThrough2.decode(protocol)
+        }
+
+        pt2roundTripped mustEqual pt2
+      }
+
+      "be copied" in {
+        val pt2 = PassThrough2(1, 2)
+
+        val pt1 = {
+          val protocol = new TBinaryProtocol(new TMemoryBuffer(256))
+          PassThrough2.encode(pt2, protocol)
+          PassThrough.decode(protocol)
+        }
+
+        val pt1Copy = pt1.copy(f1 = 2)
+
+        val pt2roundTripped = {
+          val protocol = new TBinaryProtocol(new TMemoryBuffer(256))
+          PassThrough.encode(pt1Copy, protocol)
+          PassThrough2.decode(protocol)
+        }
+
+        pt2roundTripped mustEqual PassThrough2(2, 2)
+      }
+
+      "be removable" in {
+        val pt2 = PassThrough2(1, 2)
+
+        val pt1 = {
+          val protocol = new TBinaryProtocol(new TMemoryBuffer(256))
+          PassThrough2.encode(pt2, protocol)
+          PassThrough.decode(protocol)
+        }
+
+        val pt1f = pt1.unsetField(PassThrough2.F2Field.id)
+
+        val pt2roundTripped = {
+          val protocol = new TBinaryProtocol(new TMemoryBuffer(256))
+          PassThrough.encode(pt1f, protocol)
+          PassThrough2.decode(protocol)
+        }
+
+        pt2roundTripped mustEqual PassThrough2(1, 0)
+      }
+
+      "be able to add more" in {
+        val pt1 = PassThrough(1)
+        val pt2 = PassThrough2(1, 2)
+        val f2 = pt2.getFieldBlob(PassThrough2.F2Field.id).get
+        val pt1w = pt1.setField(f2)
+
+        val pt2roundTripped = {
+          val protocol = new TBinaryProtocol(new TMemoryBuffer(256))
+          PassThrough.encode(pt1w, protocol)
+          PassThrough2.decode(protocol)
+        }
+
+        pt2roundTripped mustEqual pt2
+      }
+
+      "be proxy-able" in {
+        val pt2 = PassThrough2(1, 2)
+
+        val pt1 = {
+          val protocol = new TBinaryProtocol(new TMemoryBuffer(256))
+          PassThrough2.encode(pt2, protocol)
+          PassThrough.decode(protocol)
+        }
+
+        val proxy = new PassThrough.Proxy {
+          val _underlying_PassThrough = pt1
+        }
+
+        val pt2roundTripped = {
+          val protocol = new TBinaryProtocol(new TMemoryBuffer(256))
+          PassThrough.encode(proxy, protocol)
+          PassThrough2.decode(protocol)
+        }
+
+        pt2roundTripped mustEqual pt2
+      }
+
+      "be equallable" in {
+        val pt2 = PassThrough2(1, 2)
+
+        val pt1a = {
+          val protocol = new TBinaryProtocol(new TMemoryBuffer(256))
+          PassThrough2.encode(pt2, protocol)
+          PassThrough.decode(protocol)
+        }
+
+        val pt1b = {
+          val protocol = new TBinaryProtocol(new TMemoryBuffer(256))
+          PassThrough2.encode(pt2, protocol)
+          PassThrough.decode(protocol)
+        }
+
+        pt1a mustEqual pt1b
+      }
+    }
+
+    "gracefully handle null fields" in {
+      val prot = new TBinaryProtocol(new TMemoryBuffer(256))
+      val emp = Emperor(null, 0)
+
+      // basically these shouldn't blow up
+      Emperor.encode(emp, prot)
+      Emperor.decode(prot) mustEqual emp
+    }
+
+    "generate with special scala namespace syntax" in {
+      scrooge.test.thriftscala.Thingymabob() must haveSuperClass[scrooge.test.thriftscala.Thingymabob]
     }
   }
 }

@@ -1,15 +1,17 @@
 package com.twitter.scrooge.backend
 
 import java.util.Arrays
-import com.twitter.finagle
-import com.twitter.finagle.thrift.ThriftClientRequest
-import com.twitter.util.Future
 import org.specs.SpecificationWithJUnit
 import org.specs.matcher.Matcher
 import org.specs.mock.{ClassMocker, JMocker}
 import org.apache.thrift.protocol._
+import com.twitter.finagle
+import com.twitter.finagle.thrift.ThriftClientRequest
+import com.twitter.util.{Await, Future}
+import com.twitter.scrooge.testutil.EvalHelper
+import com.twitter.scrooge.ThriftException
 import thrift.test._
-import com.twitter.scrooge.{ThriftException, EvalHelper}
+
 
 class ServiceGeneratorSpec extends SpecificationWithJUnit with EvalHelper with JMocker with ClassMocker {
   val protocol = mock[TProtocol]
@@ -33,11 +35,11 @@ class ServiceGeneratorSpec extends SpecificationWithJUnit with EvalHelper with J
 
   "ScalaGenerator service" should {
     "generate a service interface" in {
-      val service: SimpleService.Iface = new SimpleService.Iface {
-        def deliver(where: String) = 3
+      val service: SimpleService[Some] = new SimpleService[Some] {
+        def deliver(where: String) = Some(3)
       }
 
-      service.deliver("Boston") mustEqual 3
+      service.deliver("Boston") mustEqual Some(3)
     }
 
     "generate a future-based service interface" in {
@@ -55,7 +57,7 @@ class ServiceGeneratorSpec extends SpecificationWithJUnit with EvalHelper with J
         endRead(protocol)
       }
 
-      SimpleService.DeliverArgs(protocol).where mustEqual "boston"
+      SimpleService.deliver$args.decode(protocol).where mustEqual "boston"
 
       expect {
         startWrite(protocol, new TField("where", TType.STRING, 1))
@@ -63,7 +65,7 @@ class ServiceGeneratorSpec extends SpecificationWithJUnit with EvalHelper with J
         endWrite(protocol)
       }
 
-      SimpleService.DeliverArgs("atlanta").write(protocol) mustEqual ()
+      SimpleService.deliver$args("atlanta").write(protocol) mustEqual ()
 
       expect {
         startRead(protocol, new TField("success", TType.I32, 0))
@@ -71,7 +73,7 @@ class ServiceGeneratorSpec extends SpecificationWithJUnit with EvalHelper with J
         endRead(protocol)
       }
 
-      SimpleService.DeliverResult(protocol).success mustEqual Some(13)
+      SimpleService.deliver$result.decode(protocol).success mustEqual Some(13)
 
       expect {
         startWrite(protocol, new TField("success", TType.I32, 0))
@@ -79,7 +81,7 @@ class ServiceGeneratorSpec extends SpecificationWithJUnit with EvalHelper with J
         endWrite(protocol)
       }
 
-      SimpleService.DeliverResult(Some(24)).write(protocol) mustEqual ()
+      SimpleService.deliver$result(Some(24)).write(protocol) mustEqual ()
     }
 
     "generate unions for args and return value" in {
@@ -95,7 +97,7 @@ class ServiceGeneratorSpec extends SpecificationWithJUnit with EvalHelper with J
         endRead(protocol)
       }
 
-      ThriftTest.TestUnionsArgs(protocol).arg0 mustEqual
+      ThriftTest.testUnions$args.decode(protocol).arg0 mustEqual
         MorePerfectUnion.Bools(Bools(true, false))
 
       expect {
@@ -110,7 +112,7 @@ class ServiceGeneratorSpec extends SpecificationWithJUnit with EvalHelper with J
         endWrite(protocol)
       }
 
-      ThriftTest.TestUnionsArgs(
+      ThriftTest.testUnions$args(
         MorePerfectUnion.Bonk(Bonk("hello world", 42))
       ).write(protocol) mustEqual ()
 
@@ -126,7 +128,7 @@ class ServiceGeneratorSpec extends SpecificationWithJUnit with EvalHelper with J
         endRead(protocol)
       }
 
-      ThriftTest.TestUnionsResult(protocol).success mustEqual
+      ThriftTest.testUnions$result.decode(protocol).success mustEqual
         Some(MorePerfectUnion.Bools(Bools(true, false)))
 
       expect {
@@ -141,7 +143,7 @@ class ServiceGeneratorSpec extends SpecificationWithJUnit with EvalHelper with J
         endWrite(protocol)
       }
 
-      ThriftTest.TestUnionsResult(
+      ThriftTest.testUnions$result(
         Some(MorePerfectUnion.Bonk(Bonk("hello world", 42)))
       ).write(protocol) mustEqual ()
     }
@@ -157,7 +159,7 @@ class ServiceGeneratorSpec extends SpecificationWithJUnit with EvalHelper with J
         endRead(protocol)
       }
 
-      val res = ExceptionalService.DeliverResult(protocol)
+      val res = ExceptionalService.deliver$result.decode(protocol)
       res.success must beNone
       res.ex must beSome(Xception(1, "silly"))
       res.ex2 must beNone
@@ -168,7 +170,7 @@ class ServiceGeneratorSpec extends SpecificationWithJUnit with EvalHelper with J
         endWrite(protocol)
       }
 
-      ExceptionalService.DeliverResult(Some(24)).write(protocol) mustEqual ()
+      ExceptionalService.deliver$result(Some(24)).write(protocol) mustEqual ()
 
       expect {
         startWrite(protocol, new TField("ex", TType.STRUCT, 1))
@@ -180,7 +182,7 @@ class ServiceGeneratorSpec extends SpecificationWithJUnit with EvalHelper with J
         endWrite(protocol)
       }
 
-      ExceptionalService.DeliverResult(None, Some(Xception(1, "silly"))).write(protocol) mustEqual ()
+      ExceptionalService.deliver$result(None, Some(Xception(1, "silly"))).write(protocol) mustEqual ()
 
       expect {
         startWrite(protocol, new TField("ex3", TType.STRUCT, 3))
@@ -189,16 +191,16 @@ class ServiceGeneratorSpec extends SpecificationWithJUnit with EvalHelper with J
         one(protocol).writeStructEnd()
         endWrite(protocol)
       }
-      ExceptionalService.DeliverResult(None, None, None, Some(EmptyXception())).write(protocol) mustEqual ()
+      ExceptionalService.deliver$result(None, None, None, Some(EmptyXception())).write(protocol) mustEqual ()
     }
 
-    "generate FinagledService" in {
-      val impl = mock[ExceptionalService.FutureIface]
-      val service = new ExceptionalService.FinagledService(impl, new TBinaryProtocol.Factory)
+    "generate FinagleService" in {
+      val impl = mock[ExceptionalService[Future]]
+      val service = new ExceptionalService$FinagleService(impl, new TBinaryProtocol.Factory)
 
       "success" in {
-        val request = encodeRequest("deliver", ExceptionalService.DeliverArgs("Boston")).message
-        val response = encodeResponse("deliver", ExceptionalService.DeliverResult(success = Some(42)))
+        val request = encodeRequest("deliver", ExceptionalService.deliver$args("Boston")).message
+        val response = encodeResponse("deliver", ExceptionalService.deliver$result(success = Some(42)))
 
         expect {
           one(impl).deliver("Boston") willReturn Future.value(42)
@@ -208,9 +210,9 @@ class ServiceGeneratorSpec extends SpecificationWithJUnit with EvalHelper with J
       }
 
       "exception" in {
-        val request = encodeRequest("deliver", ExceptionalService.DeliverArgs("Boston")).message
+        val request = encodeRequest("deliver", ExceptionalService.deliver$args("Boston")).message
         val ex = Xception(1, "boom")
-        val response = encodeResponse("deliver", ExceptionalService.DeliverResult(ex = Some(ex)))
+        val response = encodeResponse("deliver", ExceptionalService.deliver$result(ex = Some(ex)))
 
         expect {
           one(impl).deliver("Boston") willReturn Future.exception(ex)
@@ -221,16 +223,16 @@ class ServiceGeneratorSpec extends SpecificationWithJUnit with EvalHelper with J
     }
 
     "generate FinagledClient" in {
-      val impl = mock[ExceptionalService.FutureIface]
-      val service = new ExceptionalService.FinagledService(impl, new TBinaryProtocol.Factory)
+      val impl = mock[ExceptionalService[Future]]
+      val service = new ExceptionalService$FinagleService(impl, new TBinaryProtocol.Factory)
       val clientService = new finagle.Service[ThriftClientRequest, Array[Byte]] {
         def apply(req: ThriftClientRequest) = service(req.message)
       }
-      val client = new ExceptionalService.FinagledClient(clientService)
+      val client = new ExceptionalService$FinagleClient(clientService)
 
       "success" in {
-        val request = encodeRequest("deliver", ExceptionalService.DeliverArgs("Boston"))
-        val response = encodeResponse("deliver", ExceptionalService.DeliverResult(success = Some(42)))
+        val request = encodeRequest("deliver", ExceptionalService.deliver$args("Boston"))
+        val response = encodeResponse("deliver", ExceptionalService.deliver$result(success = Some(42)))
 
         expect {
           one(impl).deliver("Boston") willReturn Future.value(42)
@@ -239,28 +241,47 @@ class ServiceGeneratorSpec extends SpecificationWithJUnit with EvalHelper with J
         client.deliver("Boston")() mustEqual 42
       }
 
+      "success void" in {
+        val request = encodeRequest("remove", ExceptionalService.remove$args(123))
+        val response = encodeResponse("remove", ExceptionalService.remove$result())
+
+        expect {
+          one(impl).remove(123) willReturn Future.Done
+        }
+
+        client.remove(123)() mustEqual ()
+      }
+
       "exception" in {
-        val request = encodeRequest("deliver", ExceptionalService.DeliverArgs("Boston"))
         val ex = Xception(1, "boom")
-        val response = encodeResponse("deliver", ExceptionalService.DeliverResult(ex = Some(ex)))
 
         expect {
           one(impl).deliver("Boston") willReturn Future.exception(ex)
         }
+        assert(Xception(1, "boom") == ex)
+        Await.result(client.deliver("Boston")) must throwA(Xception(1, "boom"))
+      }
 
-        client.deliver("Boston")() must throwA[ThriftException](ex)
+      "void exception" in {
+        val ex = Xception(1, "boom")
+
+        expect {
+          one(impl).remove(123) willReturn Future.exception(ex)
+        }
+
+        Await.result(client.remove(123)) must throwA[ThriftException](ex)
       }
     }
 
     "correctly inherit traits across services" in {
-      "synchronous" in {
-        class BasicImpl extends ReadWriteService.Iface {
-          def getName() = "Rus"
-          def setName(name: String) { }
+      "generic" in {
+        class BasicImpl extends ReadWriteService[Some] {
+          def getName() = Some("Rus")
+          def setName(name: String) = Some(())
         }
 
-        new BasicImpl() must haveSuperClass[ReadOnlyService.Iface]
-        new BasicImpl() must haveSuperClass[ReadWriteService.Iface]
+        new BasicImpl() must haveSuperClass[ReadOnlyService[Some]]
+        new BasicImpl() must haveSuperClass[ReadWriteService[Some]]
       }
 
       "future-based" in {
@@ -274,21 +295,21 @@ class ServiceGeneratorSpec extends SpecificationWithJUnit with EvalHelper with J
       }
 
       "finagle" in {
-        val service = new ReadWriteService.FinagledService(null, null)
-        service must haveSuperClass[ReadOnlyService.FinagledService]
+        val service = new ReadWriteService$FinagleService(null, null)
+        service must haveSuperClass[ReadOnlyService$FinagleService]
 
-        val client = new ReadWriteService.FinagledClient(null, null)
-        client must haveSuperClass[ReadOnlyService.FinagledClient]
-        client must haveSuperClass[ReadOnlyService.FutureIface]
-        client must haveSuperClass[ReadWriteService.FutureIface]
+        val client = new ReadWriteService$FinagleClient(null, null)
+        client must haveSuperClass[ReadOnlyService$FinagleClient]
+        client must haveSuperClass[ReadOnlyService[Future]]
+        client must haveSuperClass[ReadWriteService[Future]]
       }
     }
 
     "camelize names only in the scala bindings" in {
-      val service = new Capsly.FinagledService(null, null) {
+      val service = new Capsly$FinagleService(null, null) {
         def getFunction2(name: String) = functionMap(name)
       }
-      service.getFunction2("badName") must not(be_==(None))
+      service.getFunction2("Bad_Name") must not(be_==(None))
     }
   }
 }
